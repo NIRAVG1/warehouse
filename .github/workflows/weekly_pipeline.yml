@@ -1,0 +1,74 @@
+name: Pharma Weekly Commercial Pipeline
+
+on:
+  schedule:
+    # Trigger weekly on Mondays at 06:00 UTC (01:00 AM EST)
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: pharma_dw
+          POSTGRES_USER: dw_admin
+          POSTGRES_PASSWORD: pharma_secure_pass_2025
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Initialize Warehouse Schema & Seed Dimensions
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: pharma_dw
+          POSTGRES_USER: dw_admin
+          POSTGRES_PASSWORD: pharma_secure_pass_2025
+        run: |
+          python -m db.schema
+
+      - name: Run 52-Week Pipeline & Data Quality Gate
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: pharma_dw
+          POSTGRES_USER: dw_admin
+          POSTGRES_PASSWORD: pharma_secure_pass_2025
+        run: |
+          python scripts/run_pipeline.py
+
+      - name: Run Test Suite
+        run: |
+          pytest tests/ -v --cov=. --cov-report=term-missing
+
+      - name: Upload Executive Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pharma-commercial-reports
+          path: reports/*.xlsx

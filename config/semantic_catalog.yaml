@@ -1,0 +1,121 @@
+version: "1.0.0"
+database: "pharma_dw"
+description: "Pharma Commercial Analytics Semantic Layer Catalog"
+
+allowed_views:
+  - "v_weekly_sales_summary"
+  - "v_territory_quota_attainment"
+  - "v_hcp_prescribing_trends"
+  - "v_product_performance"
+
+views:
+  v_weekly_sales_summary:
+    description: "Weekly aggregated sales volume and net revenue broken down by territory, product, therapeutic area, and sales representative."
+    columns:
+      week_start_date: "Date (YYYY-MM-DD) of the Monday starting the sales week"
+      iso_week: "ISO calendar week number (1 to 52)"
+      sales_year: "Calendar year of sales (e.g. 2025)"
+      sales_quarter: "Sales quarter string (e.g. '2025Q1', '2025Q2', '2025Q3', '2025Q4')"
+      territory_id: "Territory code identifier (e.g. 'CA-T1', 'TX-T2')"
+      state: "Two-letter US state abbreviation (e.g. 'CA', 'TX', 'NY')"
+      rep_id: "Sales representative ID (e.g. 'R001')"
+      rep_name: "Full name of the sales representative"
+      product_id: "Product SKU / Brand ID ('CARDIVEX', 'GLUCORA', 'RESPIRA', 'NEUROLIN', 'ONCORA', 'DERMACLEAR')"
+      product_name: "Commercial brand name"
+      therapeutic_area: "Therapeutic category ('Cardiovascular', 'Diabetes', 'Respiratory', 'Neurology', 'Oncology', 'Dermatology')"
+      unit_price: "List price per unit in USD"
+      active_prescribers: "Count of distinct HCPs who prescribed the product in this territory and week"
+      total_units: "Total prescription units dispensed/sold in the week"
+      total_revenue: "Total net revenue generated in USD"
+      effective_avg_unit_price: "Average realized price per unit after commercial discounts"
+
+  v_territory_quota_attainment:
+    description: "Quarterly sales quota targets vs actual performance per territory and product, calculating attainment percentage and performance tier."
+    columns:
+      quarter: "Sales quarter string (e.g. '2025Q1', '2025Q2')"
+      territory_id: "Territory identifier (e.g. 'CA-T1')"
+      state: "State abbreviation"
+      rep_id: "Sales representative ID"
+      rep_name: "Sales representative full name"
+      product_id: "Product identifier"
+      product_name: "Product brand name"
+      therapeutic_area: "Therapeutic area"
+      actual_units: "Total units delivered in the quarter"
+      quota_units: "Target quota units assigned for the quarter"
+      quota_attainment_pct: "Attainment percentage: (actual_units / quota_units) * 100"
+      variance_units: "Actual units minus quota units (positive is surplus, negative is deficit)"
+      actual_revenue: "Total net revenue generated in USD in the quarter"
+      performance_status: "Category: 'Met/Exceeded' (>=100%), 'Near Target (90-99%)', or 'Underperforming (<90%)'"
+
+  v_hcp_prescribing_trends:
+    description: "Healthcare provider (HCP) prescribing profiles, specialty segmentation, product mix, and total commercial volume."
+    columns:
+      hcp_id: "10-digit unique National Provider Identifier / HCP ID"
+      first_name: "HCP first name"
+      last_name: "HCP last name"
+      full_name: "HCP full name"
+      specialty: "Medical specialty (e.g. 'Cardiology', 'Endocrinology', 'Internal Medicine')"
+      state: "State where the HCP practices"
+      segment: "Commercial prescriber decile tier: 'A' (Top 20% highest volume), 'B' (Next 30%), 'C' (Remaining 50%)"
+      territory_id: "Assigned sales territory ID"
+      product_id: "Product ID"
+      product_name: "Product brand name"
+      therapeutic_area: "Therapeutic area"
+      active_weeks: "Number of active prescribing weeks in the period"
+      total_prescribed_units: "Cumulative prescription units"
+      total_prescribed_revenue: "Cumulative net revenue in USD"
+      avg_weekly_units: "Average units per active prescribing week"
+
+  v_product_performance:
+    description: "High-level product catalog summary showing cumulative volume, revenue, and HCP adoption across therapeutic areas."
+    columns:
+      product_id: "Product ID"
+      product_name: "Product brand name"
+      therapeutic_area: "Therapeutic area"
+      unit_price: "Standard unit list price"
+      total_active_weeks: "Count of distinct active weeks with sales"
+      total_prescribing_hcps: "Count of unique prescribers who wrote prescriptions for this product"
+      total_active_territories: "Count of territories with sales activity"
+      total_units_sold: "Total units sold across the year"
+      total_gross_revenue: "Total net revenue in USD"
+      avg_units_per_sale_record: "Average units per transaction"
+
+metrics:
+  quota_attainment: "SUM(actual_units) / SUM(quota_units) * 100"
+  market_share_by_product: "SUM(product_revenue) / SUM(total_revenue) * 100"
+  revenue_per_hcp: "SUM(total_revenue) / COUNT(DISTINCT hcp_id)"
+
+few_shot_examples:
+  - question: "What were the top 3 selling products by total revenue in 2025?"
+    sql: |
+      SELECT product_name, therapeutic_area, SUM(total_revenue) AS total_revenue, SUM(total_units) AS total_units
+      FROM v_weekly_sales_summary
+      WHERE sales_year = 2025
+      GROUP BY product_name, therapeutic_area
+      ORDER BY total_revenue DESC
+      LIMIT 3;
+
+  - question: "Which territories had the lowest quota attainment for GLUCORA in 2025Q2?"
+    sql: |
+      SELECT territory_id, rep_name, actual_units, quota_units, quota_attainment_pct, variance_units
+      FROM v_territory_quota_attainment
+      WHERE quarter = '2025Q2' AND product_id = 'GLUCORA'
+      ORDER BY quota_attainment_pct ASC
+      LIMIT 5;
+
+  - question: "Show me the top 10 Segment A cardiologists by total revenue generated."
+    sql: |
+      SELECT hcp_id, full_name, specialty, state, territory_id, SUM(total_prescribed_units) AS total_units, SUM(total_prescribed_revenue) AS total_revenue
+      FROM v_hcp_prescribing_trends
+      WHERE specialty = 'Cardiology' AND segment = 'A'
+      GROUP BY hcp_id, full_name, specialty, state, territory_id
+      ORDER BY total_revenue DESC
+      LIMIT 10;
+
+  - question: "What was the weekly revenue trend for DERMACLEAR after its product launch?"
+    sql: |
+      SELECT week_start_date, iso_week, SUM(total_units) AS total_units, SUM(total_revenue) AS total_revenue, COUNT(DISTINCT active_prescribers) AS active_prescribers
+      FROM v_weekly_sales_summary
+      WHERE product_id = 'DERMACLEAR'
+      GROUP BY week_start_date, iso_week
+      ORDER BY week_start_date ASC;

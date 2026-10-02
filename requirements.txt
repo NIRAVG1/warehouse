@@ -1,0 +1,30 @@
+# Core Data & Warehouse
+pandas>=2.2.0
+numpy>=1.26.0
+faker>=24.0.0
+psycopg2-binary>=2.9.9
+sqlalchemy>=2.0.25
+duckdb>=0.10.0
+
+# SQL Parsing & AST Guardrails
+sqlglot>=23.0.0
+
+# LLM & AI Agents
+openai>=1.14.0
+google-genai>=0.1.1
+python-dotenv>=1.0.1
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+pyyaml>=6.0.0
+requests>=2.31.0
+
+# UI & Visualization
+streamlit>=1.32.0
+openpyxl>=3.1.2
+xlsxwriter>=3.1.9
+tabulate>=0.9.0
+
+# Testing & Quality
+pytest>=8.0.0
+pytest-cov>=4.1.0
+ruff>=0.3.0
