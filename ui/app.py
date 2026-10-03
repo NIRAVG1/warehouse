@@ -106,7 +106,7 @@ agent = get_agent()
 db = get_db(read_only=True)
 
 # Sidebar
-st.sidebar.image("https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&q=80", use_container_width=True)
+st.sidebar.image("https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&q=80", use_column_width=True)
 st.sidebar.markdown("### 💊 Pharma Commercial DW")
 st.sidebar.markdown("**Database**: PostgreSQL 16 (Semantic Layer)")
 st.sidebar.markdown("**Role**: `pharma_analyst_ro` (Read-Only)")
