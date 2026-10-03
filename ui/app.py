@@ -92,25 +92,47 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-@st.cache_resource
-def get_agent():
-    return TextToSQLAgent()
-
-
-@st.cache_resource
 def get_explainer():
     return CommercialAnomalyExplainer()
 
 
-agent = get_agent()
+# Drop any cached explainer created by an earlier app version. Its DuckDB
+# connection may have been opened with a different read-only configuration.
+st.cache_resource.clear()
+
+
 db = get_db(read_only=True)
 
 # Sidebar
-st.sidebar.image("https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&q=80", use_column_width=True)
+st.sidebar.image("https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=400&q=80", use_container_width=True)
 st.sidebar.markdown("### 💊 Pharma Commercial DW")
 st.sidebar.markdown("**Database**: PostgreSQL 16 (Semantic Layer)")
 st.sidebar.markdown("**Role**: `pharma_analyst_ro` (Read-Only)")
 st.sidebar.markdown("**Guardrails**: AST Validation via `sqlglot`")
+st.sidebar.divider()
+st.sidebar.markdown("#### Text-to-SQL model API")
+selected_provider = st.sidebar.selectbox(
+    "Provider", ["openai", "gemini", "local"],
+    index=["openai", "gemini", "local"].index(settings.DEFAULT_LLM_PROVIDER.lower())
+    if settings.DEFAULT_LLM_PROVIDER.lower() in {"openai", "gemini", "local"} else 0,
+    format_func=lambda value: {"openai": "OpenAI", "gemini": "Google Gemini", "local": "Local SQL rules"}[value],
+)
+provider_key_env = {"openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}.get(selected_provider)
+session_api_key = None
+if provider_key_env:
+    session_api_key = st.sidebar.text_input(
+        f"{provider_key_env} (optional if set in .env)",
+        type="password",
+        help="Used only for this Streamlit session; it is not written to project files.",
+    ) or None
+configured_key = bool(session_api_key or (settings.OPENAI_API_KEY if selected_provider == "openai" else settings.GEMINI_API_KEY if selected_provider == "gemini" else None))
+if selected_provider == "local":
+    st.sidebar.caption("Uses the built-in local parser; no external model API call.")
+elif configured_key:
+    st.sidebar.caption(f"{provider_key_env} is configured. Queries will use the selected API.")
+else:
+    st.sidebar.caption(f"No {provider_key_env} found. The local SQL rules will be used until you add a key.")
+agent = TextToSQLAgent(provider=selected_provider, api_key=session_api_key)
 st.sidebar.divider()
 
 # Quick KPI aggregates in sidebar
@@ -166,7 +188,7 @@ with tab_chat:
         placeholder="e.g. Which territories achieved over 100% quota attainment in 2025Q1?",
     )
 
-    if st.button("🚀 Analyze Query", type="primary") or user_query:
+    if st.button("🚀 Analyze Query", type="primary"):
         if user_query:
             with st.spinner("Analyzing semantic schema, generating guarded SQL, and querying warehouse..."):
                 response = agent.ask(user_query)
@@ -177,7 +199,9 @@ with tab_chat:
             elif not response.guardrail_passed:
                 st.warning(f"⚠️ {response.error}")
             else:
-                st.success(f"Query Executed in **{response.execution_time_ms:.1f}ms** (Guardrails Passed ✅)")
+                st.success(f"Query Executed in **{response.execution_time_ms:.1f}ms** using **{response.provider_used}** (Guardrails Passed ✅)")
+                if response.provider_notice:
+                    st.warning(response.provider_notice)
                 
                 col_ans, col_sql = st.columns([3, 2])
                 with col_ans:
@@ -236,8 +260,7 @@ with tab_anomalies:
     st.markdown("Scans 52-week time-series data using 4-week rolling baselines, z-scores, and state-product completeness checks.")
 
     explainer = get_explainer()
-    if st.button("🔄 Scan Warehouse for Commercial Anomalies"):
-        st.cache_resource.clear()
+    st.button("🔄 Scan Warehouse for Commercial Anomalies")
 
     with st.spinner("Analyzing volume distributions and running approved drill-down queries..."):
         detected_anomalies = explainer.scan_and_explain_anomalies()

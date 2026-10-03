@@ -29,7 +29,7 @@ class DetectedAnomaly:
 
 class CommercialAnomalyExplainer:
     def __init__(self):
-        self.db = get_db()
+        self.db = get_db(read_only=True)
 
     def scan_and_explain_anomalies(self) -> List[DetectedAnomaly]:
         """Detects anomalies across all 52 weeks using rolling statistical baselines and generates hypotheses."""

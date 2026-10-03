@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class WeeklyReportGenerator:
     def __init__(self):
-        self.db = get_db()
+        self.db = get_db(read_only=True)
         self.reports_dir = settings.REPORTS_DIR
         self.reports_dir.mkdir(parents=True, exist_ok=True)
 

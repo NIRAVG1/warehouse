@@ -73,6 +73,16 @@ make setup
 source .venv/bin/activate
 ```
 
+### Configure the Text-to-SQL Model API
+
+The assistant can call OpenAI or Google Gemini. Set `DEFAULT_LLM_PROVIDER=openai` (or `gemini`) and the matching `OPENAI_API_KEY` or `GEMINI_API_KEY` in a local `.env` file, or enter the provider key in the Streamlit sidebar for the current session. The sidebar reports which provider handled each query. Keys are not written to project files when entered in the UI. If no key is available or an API call fails, the agent reports that it used the built-in local SQL rules instead.
+
+```bash
+cp .env.example .env
+# Edit .env and add your provider key before starting the app.
+make app
+```
+
 ### 2. Run Entire Pipeline End-to-End
 ```bash
 # 1. Generate 52 weeks of synthetic pharma commercial data

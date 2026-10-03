@@ -27,6 +27,8 @@ class SQLAgentResponse:
     guardrail_passed: bool
     error: Optional[str] = None
     is_blocked_security: bool = False
+    provider_used: str = "Local SQL rules"
+    provider_notice: Optional[str] = None
 
 
 class TextToSQLAgent:
@@ -35,11 +37,17 @@ class TextToSQLAgent:
         guardrail: Optional[SQLGuardrail] = None,
         prompt_builder: Optional[SemanticCatalogPromptBuilder] = None,
         max_retries: int = 2,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
     ):
         self.db = get_db(read_only=True)
         self.guardrail = guardrail or SQLGuardrail()
         self.prompt_builder = prompt_builder or SemanticCatalogPromptBuilder()
         self.max_retries = max_retries
+        self.provider = (provider or settings.DEFAULT_LLM_PROVIDER).strip().lower()
+        self.api_key = api_key
+        self.provider_used = "local"
+        self.provider_notice: Optional[str] = None
         self.system_prompt = self.prompt_builder.build_system_prompt()
 
     def ask(self, question: str) -> SQLAgentResponse:
@@ -93,6 +101,8 @@ class TextToSQLAgent:
                         guardrail_passed=False,
                         error=guardrail_res.error_message,
                         is_blocked_security=True,
+                        provider_used=self.provider_used,
+                        provider_notice=self.provider_notice,
                     )
 
                 # If syntax error, retry
@@ -119,6 +129,8 @@ class TextToSQLAgent:
                     guardrail_passed=True,
                     error=None,
                     is_blocked_security=False,
+                    provider_used=self.provider_used,
+                    provider_notice=self.provider_notice,
                 )
 
             except Exception as db_err:
@@ -137,6 +149,8 @@ class TextToSQLAgent:
             retries_attempted=retries,
             guardrail_passed=False,
             error=last_error,
+            provider_used=self.provider_used,
+            provider_notice=self.provider_notice,
         )
 
     def _extract_sql(self, text: str) -> str:
@@ -151,39 +165,60 @@ class TextToSQLAgent:
         return text.strip()
 
     def _call_llm(self, system_prompt: str, user_message: str) -> str:
-        """Dispatches LLM call using available provider or fallback deterministic semantic engine."""
-        # 1. Gemini API
-        if settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY"):
-            try:
-                from google import genai
-                client = genai.Client(api_key=settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY"))
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=f"{system_prompt}\n\nUser Question: {user_message}",
-                )
-                if response.text:
-                    return response.text
-            except Exception as e:
-                logger.warning(f"Gemini call failed: {e}")
+        """Use the selected hosted provider when configured, otherwise use local rules."""
+        if self.provider == "local":
+            self.provider_used = "Local SQL rules"
+            self.provider_notice = None
+            return self._local_semantic_parser(user_message)
+        if self.provider == "gemini":
+            api_key = self.api_key or settings.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                self.provider_notice = "Gemini selected, but no API key is configured; used local SQL rules."
+            else:
+                try:
+                    from google import genai
+                    client = genai.Client(api_key=api_key)
+                    response = client.models.generate_content(
+                        model="gemini-3.8-flash",
+                        contents=f"{system_prompt}\n\nUser Question: {user_message}",
+                    )
+                    if response.text:
+                        self.provider_used = "Gemini API"
+                        self.provider_notice = None
+                        return response.text
+                    raise RuntimeError("Gemini returned an empty response")
+                except Exception as e:
+                    logger.warning("Gemini call failed: %s", e)
+                    self.provider_notice = f"Gemini API call failed ({type(e).__name__}); used local SQL rules."
+        elif self.provider == "openai":
+            api_key = self.api_key or settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                self.provider_notice = "OpenAI selected, but no API key is configured; used local SQL rules."
+            else:
+                try:
+                    from openai import OpenAI
+                    client = OpenAI(api_key=api_key)
+                    resp = client.chat.completions.create(
+                        model=settings.DEFAULT_LLM_MODEL,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message},
+                        ],
+                        temperature=0.0,
+                    )
+                    content = resp.choices[0].message.content or ""
+                    if content:
+                        self.provider_used = "OpenAI API"
+                        self.provider_notice = None
+                        return content
+                    raise RuntimeError("OpenAI returned an empty response")
+                except Exception as e:
+                    logger.warning("OpenAI call failed: %s", e)
+                    self.provider_notice = f"OpenAI API call failed ({type(e).__name__}); used local SQL rules."
+        else:
+            self.provider_notice = f"Unknown provider '{self.provider}'; used local SQL rules."
 
-        # 2. OpenAI API
-        if settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY"):
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=settings.OPENAI_API_KEY or os.environ.get("OPENAI_API_KEY"))
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    temperature=0.0,
-                )
-                return resp.choices[0].message.content or ""
-            except Exception as e:
-                logger.warning(f"OpenAI call failed: {e}")
-
-        # 3. Deterministic Local Semantic Parser (Zero external dependency fallback)
+        self.provider_used = "Local SQL rules"
         return self._local_semantic_parser(user_message)
 
     def _local_semantic_parser(self, text: str) -> str:
