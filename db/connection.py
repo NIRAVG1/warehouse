@@ -31,9 +31,12 @@ class DatabaseEngine:
         if self._duckdb_conn is None:
             import duckdb
             settings.DUCKDB_PATH.parent.mkdir(parents=True, exist_ok=True)
-            self._duckdb_conn = duckdb.connect(str(settings.DUCKDB_PATH))
+            self._duckdb_conn = duckdb.connect(str(settings.DUCKDB_PATH), read_only=self.read_only)
             # Enable standard postgres compatibility extensions/settings
-            self._duckdb_conn.execute("SET preserve_insertion_order=false;")
+            try:
+                self._duckdb_conn.execute("SET preserve_insertion_order=false;")
+            except Exception:
+                pass
         return self._duckdb_conn
 
     def is_postgres_available(self) -> bool:
